@@ -24,9 +24,11 @@ A conversational AI agent for managing blog posts, LinkedIn content, and approva
    SLACK_SIGNING_SECRET=...
    SLACK_CHANNEL=blog
    OPENAI_API_KEY=sk-...
+   TAVILY_API_KEY=tvly-...
    ```
 
-   Get OpenAI API key: https://platform.openai.com/api-keys
+   - OpenAI API key: https://platform.openai.com/api-keys
+   - Tavily API key (for web search): https://tavily.com/
 
 3. **Initialize storage**:
    ```bash
