@@ -49,7 +49,7 @@ Use web search and URL fetching to:
 - Deep expertise without jargon walls`;
 
 export class LLMClient {
-  private model = openai("gpt-4o");
+  private model = openai("gpt-5.2");
 
   constructor(private agent: ContentAgent) {}
 
@@ -192,17 +192,25 @@ export class LLMClient {
     })
   };
 
-  async chat(message: string, context?: string): Promise<string> {
+  async chat(message: string, history?: Array<{ role: "user" | "assistant"; content: string }>): Promise<string> {
     if (!process.env.OPENAI_API_KEY) {
       return "OpenAI API key not configured. Please add OPENAI_API_KEY to .env file.";
     }
 
     try {
+      // Build messages array from history (excluding the current message which is already in history)
+      const previousMessages = history 
+        ? history.slice(0, -1).map(msg => ({ 
+            role: msg.role as "user" | "assistant", 
+            content: msg.content 
+          }))
+        : [];
+
       const { text } = await generateText({
         model: this.model,
         system: SYSTEM_PROMPT,
         messages: [
-          ...(context ? [{ role: "system" as const, content: context }] : []),
+          ...previousMessages,
           { role: "user" as const, content: message }
         ],
         tools: this.tools,
