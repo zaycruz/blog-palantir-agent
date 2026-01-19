@@ -10,54 +10,34 @@ import { getSkillsPrompt } from '../../shared/skills.js';
 
 const LINEAR_AGENT_BASE_PROMPT = `You are a Linear project management assistant. You help manage issues, track projects, and keep the team organized.
 
-## Capabilities
+IMPORTANT: You have tools to interact with Linear. Always use them to fulfill requests - do not ask users for information you can retrieve yourself.
 
-### Issues
-- Create new issues with title, description, priority
-- Update issue status, priority, assignee
-- Search for issues by keyword
-- List your assigned issues
-- View issue details
+## Tools Available
 
-### Projects
-- View project progress
-- List issues in a project
-
-### Cycles/Sprints
-- View current cycle and its issues
-- Check sprint progress
-
-### Comments
-- Add comments to issues
+- **getMyIssues**: Get issues assigned to the authenticated user. Use this when user asks about "my issues", "my tasks", "what am I working on", etc.
+- **searchIssues**: Search for issues by keyword
+- **getIssue**: Get details of a specific issue by identifier (e.g., RAA-123)
+- **createIssue**: Create a new issue
+- **updateIssue**: Update an existing issue
+- **addComment**: Add a comment to an issue
+- **getTeams**: List all teams
+- **getProjects**: List projects in a team
+- **getCurrentCycle**: Get current sprint/cycle
 
 ## Priority Levels
 - 0 = No priority
 - 1 = Urgent
-- 2 = High
+- 2 = High  
 - 3 = Medium
 - 4 = Low
 
 ## Guidelines
 
-1. When creating issues:
-   - Extract a clear, actionable title
-   - Include relevant context in description
-   - Suggest appropriate priority based on urgency words
-   - Ask for team if not specified
-
-2. When updating issues:
-   - Confirm which issue before making changes
-   - Use issue identifier (e.g., "ENG-123") when possible
-
-3. Format responses for Slack:
-   - Use bullet points for lists
-   - Bold important info (identifiers, status)
-   - Include links to issues
-
-4. Be proactive:
-   - Summarize issue counts by status
-   - Highlight blockers or urgent items
-   - Suggest next actions`;
+1. ALWAYS call tools to get data - don't ask users for info you can look up
+2. When user says "my issues" or "my tasks", call getMyIssues immediately
+3. When creating issues, use getTeams first if teamId is needed
+4. Format responses for Slack with bullet points and bold identifiers
+5. Include issue URLs in responses when available`;
 
 export class LinearAgent {
   private api: LinearApiClient | null = null;
@@ -188,9 +168,9 @@ export class LinearAgent {
       }),
 
       getMyIssues: tool({
-        description: "Get issues assigned to the current user",
+        description: "Get issues assigned to the current user. Call this when user asks about 'my issues', 'my tasks', etc.",
         inputSchema: z.object({
-          limit: z.number().optional().describe("Max results (default 20)")
+          limit: z.number().default(20).describe("Max results (default 20)")
         }),
         execute: async ({ limit }) => {
           const issues = await api.getMyIssues(limit || 20);
@@ -222,8 +202,10 @@ export class LinearAgent {
       }),
 
       getTeams: tool({
-        description: "List all teams in the workspace",
-        inputSchema: z.object({}),
+        description: "List all teams in the workspace. Call this to get team IDs for creating issues.",
+        inputSchema: z.object({
+          includeArchived: z.boolean().default(false).describe("Include archived teams")
+        }),
         execute: async () => {
           const teams = await api.getTeams();
           return JSON.stringify(teams);

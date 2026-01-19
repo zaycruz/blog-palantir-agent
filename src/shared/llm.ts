@@ -83,9 +83,19 @@ export class LLMClient {
         const toolOutputs: string[] = [];
         
         for (const step of result.steps) {
+          // Check step.content for tool-result items (new AI SDK structure)
+          const content = (step as any).content;
+          if (Array.isArray(content)) {
+            for (const item of content) {
+              if (item.type === 'tool-result' && item.output) {
+                toolOutputs.push(String(item.output));
+              }
+            }
+          }
+          // Also check toolResults for backwards compatibility
           for (const toolResult of step.toolResults || []) {
-            const output = (toolResult as any).result;
-            if (output) {
+            const output = (toolResult as any).result || (toolResult as any).output;
+            if (output && !toolOutputs.includes(String(output))) {
               toolOutputs.push(String(output));
             }
           }
