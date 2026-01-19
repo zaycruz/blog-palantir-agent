@@ -23,16 +23,17 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are an intent classifier for a multi-a
 Available agents:
 - content: Handles LinkedIn content creation, drafts, research, topics, and writing assistance
 - hubspot: Handles CRM operations - contacts, companies, deals, tasks, and notes
+- linear: Handles project management - issues, sprints, projects, team tasks
 - general: For general questions, greetings, or unclear requests
 
 Analyze the message and respond with a JSON object:
 {
-  "agent": "content" | "hubspot" | "general",
+  "agent": "content" | "hubspot" | "linear" | "general",
   "intent": "brief description of what the user wants",
   "confidence": 0.0 to 1.0,
   "entities": [
     {
-      "type": "contact" | "deal" | "company" | "task" | "date" | "amount",
+      "type": "contact" | "deal" | "company" | "task" | "date" | "amount" | "issue",
       "value": "extracted value"
     }
   ]
@@ -41,13 +42,14 @@ Analyze the message and respond with a JSON object:
 Key patterns:
 - "draft", "write", "post", "LinkedIn", "content", "article", "topic" → content
 - "contact", "company", "deal", "task", "note", "CRM", "HubSpot", "pipeline", "follow up" → hubspot
+- "issue", "ticket", "bug", "feature", "sprint", "cycle", "project", "Linear", "backlog", "my tasks", "assigned" → linear
 - Names with titles like "CTO at Company" → hubspot contact
 - Dollar amounts, deal stages → hubspot deal
-- Due dates with tasks → hubspot task
+- Issue identifiers like "ENG-123", "PROJ-456" → linear issue
 
 Pronouns (he/she/they/it) should NOT be classified as entities - the orchestrator will resolve them from context.
 
-IMPORTANT: Consider conversation context when classifying. If the user is continuing a conversation about CRM, assume they're still talking about HubSpot even without explicit keywords.`;
+IMPORTANT: Consider conversation context when classifying. If the user is continuing a conversation about a specific domain, assume they're still talking about it even without explicit keywords.`;
 
 export class IntentClassifier {
   private llm: LLMClient;
@@ -151,12 +153,14 @@ export class IntentClassifier {
 
     // HubSpot patterns
     const hubspotPatterns = [
-      /^(add|create|update|find|show|list)\s+(a\s+)?(contact|company|deal|task|note)/,
+      /^(add|create|update|find|show|list)\s+(a\s+)?(contact|company|deal|note)/,
+      /^(create|add)\s+(a\s+)?task\s+to\s+follow/,  // "create a task to follow up" -> hubspot
       /^log\s+(a\s+)?note/,
       /^(create|add)\s+.*as\s+a\s+contact/,
       /^follow\s*up\s+(with|on)/,
       /pipeline\s+summary/,
-      /show\s+(my\s+)?(deals|tasks|contacts)/
+      /show\s+(my\s+)?(deals|contacts)/,
+      /hubspot/i
     ];
 
     for (const pattern of hubspotPatterns) {
@@ -168,6 +172,43 @@ export class IntentClassifier {
           entities: []
         };
       }
+    }
+
+    // Linear patterns
+    const linearPatterns = [
+      /^(create|add|new)\s+(an?\s+)?(issue|ticket|bug)/,
+      /^(show|list|get)\s+(my\s+)?(issues|tickets)/,
+      /^my\s+(issues|tasks|tickets)/,
+      /^(current|active)\s+(sprint|cycle)/,
+      /^(update|close|complete|mark)\s+(issue|ticket)/,
+      /^what('s| is)\s+(in\s+)?(the\s+)?(sprint|backlog|cycle)/,
+      /linear/i,
+      /^sprint\b/,
+      /^backlog\b/,
+      /assign\s+to\s+(factory|codex|droid)/i
+    ];
+
+    // Check for issue identifiers like ENG-123
+    const hasIssueId = /\b[A-Z]+-\d+\b/.test(message);
+
+    for (const pattern of linearPatterns) {
+      if (pattern.test(lower) || pattern.test(message)) {
+        return {
+          agent: 'linear',
+          intent: 'Linear operation',
+          confidence: 0.95,
+          entities: []
+        };
+      }
+    }
+
+    if (hasIssueId) {
+      return {
+        agent: 'linear',
+        intent: 'Linear issue reference',
+        confidence: 0.9,
+        entities: []
+      };
     }
 
     // General patterns

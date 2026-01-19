@@ -9,6 +9,7 @@ import { ResearchStorage } from '../../db/research.js';
 import { AgentResponse, ExtractedEntity, EntityRef, SearchResult } from '../../shared/types.js';
 import { CONTENT_AGENT_SYSTEM_PROMPT, CRITIC_SYSTEM_PROMPT } from './prompts.js';
 import { Draft, ContentType, InterviewEntry, TopicQueueItem } from './types.js';
+import { getSkillsPrompt } from '../../shared/skills.js';
 
 export class ContentAgent {
   private draftStorage: DraftStorage;
@@ -29,11 +30,15 @@ export class ContentAgent {
   ): Promise<AgentResponse> {
     const tools = this.getTools();
 
+    // Load skills and build system prompt
+    const skillsPrompt = getSkillsPrompt('content');
+    const systemPrompt = CONTENT_AGENT_SYSTEM_PROMPT + skillsPrompt;
+
     const response = await this.llm.chat(
       message,
       history.map(h => ({ role: h.role, content: h.content })),
       {
-        systemPrompt: CONTENT_AGENT_SYSTEM_PROMPT,
+        systemPrompt,
         tools,
         maxSteps: 10
       }
