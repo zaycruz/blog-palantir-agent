@@ -28,10 +28,14 @@ export class ContextStorage {
     // Try to find existing context
     const existing = this.find(channelId, threadTs);
 
-    if (existing && !this.isExpired(existing)) {
-      // Update last activity
-      this.touchActivity(existing.id);
-      return existing;
+    if (existing) {
+      // Threaded conversations never expire - threads are natural conversation boundaries
+      // Only check expiration for non-threaded (DM) contexts
+      if (threadTs || !this.isExpired(existing)) {
+        // Update last activity
+        this.touchActivity(existing.id, !!threadTs);
+        return existing;
+      }
     }
 
     // Create new context
@@ -190,15 +194,25 @@ export class ContextStorage {
   }
 
   // Touch last activity time
-  touchActivity(contextId: string): void {
+  touchActivity(contextId: string, isThreaded: boolean = false): void {
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.config.expirationMinutes * 60 * 1000);
-
-    this.db.prepare(`
-      UPDATE conversation_contexts
-      SET last_activity_at = ?, expires_at = ?
-      WHERE id = ?
-    `).run(now.toISOString(), expiresAt.toISOString(), contextId);
+    
+    if (isThreaded) {
+      // Threaded contexts don't expire - just update activity time
+      this.db.prepare(`
+        UPDATE conversation_contexts
+        SET last_activity_at = ?
+        WHERE id = ?
+      `).run(now.toISOString(), contextId);
+    } else {
+      // Non-threaded contexts have expiration
+      const expiresAt = new Date(now.getTime() + this.config.expirationMinutes * 60 * 1000);
+      this.db.prepare(`
+        UPDATE conversation_contexts
+        SET last_activity_at = ?, expires_at = ?
+        WHERE id = ?
+      `).run(now.toISOString(), expiresAt.toISOString(), contextId);
+    }
   }
 
   // Check if context is expired
@@ -206,11 +220,13 @@ export class ContextStorage {
     return new Date(context.expiresAt) < new Date();
   }
 
-  // Clean up expired contexts
+  // Clean up expired contexts (only non-threaded ones)
   cleanupExpired(): number {
     const now = new Date().toISOString();
+    // Only delete contexts that have no thread_ts (DMs/non-threaded) AND are expired
     const result = this.db.prepare(`
-      DELETE FROM conversation_contexts WHERE expires_at < ?
+      DELETE FROM conversation_contexts 
+      WHERE expires_at < ? AND slack_thread_ts IS NULL
     `).run(now);
     return result.changes;
   }

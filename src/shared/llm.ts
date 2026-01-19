@@ -66,8 +66,61 @@ export class LLMClient {
         generateOptions.maxSteps = options.maxSteps || 10;
       }
 
-      const { text } = await generateText(generateOptions);
-      return text;
+      const result = await generateText(generateOptions);
+      
+      // The final text response after all tool calls are processed
+      if (result.text) {
+        return result.text;
+      }
+      
+      // Check if any tools were actually called
+      const hasToolCalls = result.steps?.some(step => 
+        step.toolCalls && step.toolCalls.length > 0
+      );
+      
+      // If tools were called, collect results and summarize
+      if (hasToolCalls && result.steps && result.steps.length > 0) {
+        const toolOutputs: string[] = [];
+        
+        for (const step of result.steps) {
+          for (const toolResult of step.toolResults || []) {
+            const output = (toolResult as any).result;
+            if (output) {
+              toolOutputs.push(String(output));
+            }
+          }
+        }
+        
+        if (toolOutputs.length > 0) {
+          // Ask LLM to summarize the tool results in natural language
+          const summaryResult = await generateText({
+            model: this.getModel(),
+            system: `You are a helpful assistant. The user asked a question and tools were used to get data. 
+Summarize the results in a natural, conversational way. Be concise and helpful.
+Format for Slack: use bullet points, bold important info, keep it scannable.
+Never show raw JSON to users.`,
+            messages: [
+              { role: 'user', content: message },
+              { role: 'assistant', content: `I found this data:\n${toolOutputs.join('\n\n')}` },
+              { role: 'user', content: 'Please summarize this in a natural, helpful way.' }
+            ]
+          });
+          
+          return summaryResult.text || 'I completed the action but could not generate a summary.';
+        }
+      }
+      
+      // No tools called and no text - this shouldn't happen but make a simple call
+      if (!result.text) {
+        const fallbackResult = await generateText({
+          model: this.getModel(),
+          system: options.systemPrompt,
+          messages: [{ role: 'user', content: message }]
+        });
+        return fallbackResult.text || "I'm not sure how to help with that. Could you rephrase?";
+      }
+      
+      return result.text;
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes('API key')) {

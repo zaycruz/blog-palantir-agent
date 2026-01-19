@@ -81,10 +81,12 @@ export class HubSpotAgent {
   constructor(db: Database.Database, llm: LLMClient) {
     this.llm = llm;
 
-    // Initialize API client if token is available
+    // Initialize API client - supports both direct token and OAuth
     const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
-    if (accessToken) {
-      this.api = new HubSpotApiClient({ accessToken });
+    const clientId = process.env.HUBSPOT_CLIENT_ID;
+    
+    if (accessToken || clientId) {
+      this.api = new HubSpotApiClient({ accessToken: accessToken || '' });
     }
   }
 

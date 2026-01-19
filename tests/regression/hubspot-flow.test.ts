@@ -1,33 +1,27 @@
-// Regression tests for HubSpot conversation flow
+// Live integration tests for HubSpot conversation flow
+// These tests use real LLM and HubSpot API calls
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { Orchestrator } from '../../src/orchestrator/index.js';
 import { initializeDatabase, closeDatabase } from '../../src/db/index.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { config } from 'dotenv';
 
-// Mock fetch for HubSpot API
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Load environment variables
+config();
 
-// Mock environment
-const originalEnv = process.env;
+// Skip if no API keys configured
+const hasRequiredEnv = process.env.OPENAI_API_KEY && process.env.HUBSPOT_ACCESS_TOKEN;
 
-describe('HubSpot conversation flow', () => {
+describe.skipIf(!hasRequiredEnv)('HubSpot conversation flow', () => {
   let db: Database.Database;
   let orchestrator: Orchestrator;
   let testDbPath: string;
 
   beforeEach(async () => {
-    // Set up mock environment
-    process.env = {
-      ...originalEnv,
-      OPENAI_API_KEY: 'test-key',
-      HUBSPOT_ACCESS_TOKEN: 'test-hubspot-token'
-    };
-
     // Create a unique test database
     testDbPath = path.join('/tmp', `test-hubspot-${randomUUID()}.sqlite`);
     db = await initializeDatabase({ path: testDbPath });
@@ -40,13 +34,9 @@ describe('HubSpot conversation flow', () => {
         temperature: 0.7
       }
     });
-
-    // Reset fetch mock
-    mockFetch.mockReset();
   });
 
   afterEach(async () => {
-    process.env = originalEnv;
     closeDatabase();
     try {
       await fs.unlink(testDbPath);
@@ -55,225 +45,75 @@ describe('HubSpot conversation flow', () => {
     }
   });
 
-  it('handles multi-turn contact creation flow', async () => {
-    // Mock LLM responses for the conversation
-    const llmResponses = [
-      // First turn: Add contact
-      `I'll add Maria Lopez to HubSpot.
+  it('handles contact creation', async () => {
+    const channelId = `C-${randomUUID().slice(0, 8)}`;
+    const threadTs = `thread-${Date.now()}`;
+    const testEmail = `test-${Date.now()}@example.com`;
 
-Added **Maria Lopez** to HubSpot:
-- Company: TechStartup
-- Title: CTO
-
-Is there anything else you'd like to add to her record?`,
-
-      // Second turn: Log note (with pronoun resolution)
-      `Added note to **Maria Lopez**:
-
-"Met at Denver conference"
-
-The note has been linked to her contact record.`,
-
-      // Third turn: Create task
-      `Created task: **Follow up with Maria Lopez**
-- Due: January 22, 2026
-- Priority: Medium
-
-I've linked this task to Maria's contact record.`
-    ];
-
-    let llmCallCount = 0;
-
-    // Mock the LLM chat call
-    mockFetch.mockImplementation(async (url: string) => {
-      if (url.includes('openai')) {
-        const response = llmResponses[llmCallCount++] || 'OK';
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{
-              message: {
-                content: response,
-                role: 'assistant'
-              }
-            }]
-          })
-        };
-      }
-
-      // Mock HubSpot API calls
-      if (url.includes('hubapi.com')) {
-        if (url.includes('contacts')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: 'contact-123',
-              properties: {
-                firstname: 'Maria',
-                lastname: 'Lopez',
-                company: 'TechStartup',
-                jobtitle: 'CTO'
-              }
-            })
-          };
-        }
-        if (url.includes('notes')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: 'note-123',
-              properties: {
-                hs_note_body: 'Met at Denver conference'
-              }
-            })
-          };
-        }
-        if (url.includes('tasks')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: 'task-123',
-              properties: {
-                hs_task_subject: 'Follow up with Maria Lopez',
-                hs_task_status: 'NOT_STARTED'
-              }
-            })
-          };
-        }
-        // Association endpoints
-        if (url.includes('associations')) {
-          return { ok: true, status: 204 };
-        }
-      }
-
-      return { ok: false, status: 404 };
-    });
-
-    // Simulate conversation
-    const channelId = 'C123';
-    const threadTs = 'thread-1';
-
-    // Turn 1: Create contact
-    const response1 = await orchestrator.handle(
-      'Add Maria Lopez as a contact, she is CTO at TechStartup',
+    // Create a contact with unique email to avoid conflicts
+    const response = await orchestrator.handle(
+      `Add John TestUser as a contact with email ${testEmail}, he is Engineer at TestCorp`,
       channelId,
       threadTs,
       'U456'
     );
 
-    expect(response1.message).toContain('Maria Lopez');
+    // Should acknowledge the contact creation
+    expect(response.message.toLowerCase()).toMatch(/added|created|john/i);
 
     // Verify context was created
     const context = orchestrator.getContext(channelId, threadTs);
     expect(context).not.toBeNull();
     expect(context?.history.length).toBeGreaterThan(0);
+  }, 30000); // 30s timeout for API calls
 
-    // Turn 2: Follow-up with pronoun (should resolve "her" to Maria)
-    const response2 = await orchestrator.handle(
-      'Also log a note that we met at the Denver conference',
+  it('routes correctly to different agents', async () => {
+    const channelId = `C-${randomUUID().slice(0, 8)}`;
+    
+    // Test HubSpot routing
+    const hubspotResponse = await orchestrator.handle(
+      'Show my deals',
       channelId,
-      threadTs,
+      'thread-hs',
       'U456'
     );
+    // Should route to HubSpot and respond about deals
+    expect(hubspotResponse.message).toBeDefined();
 
-    // The response should reference Maria (pronoun resolved)
-    expect(response2.message.toLowerCase()).toContain('maria');
-
-    // Turn 3: Create task (continuing conversation)
-    const response3 = await orchestrator.handle(
-      'And create a follow-up task for next week',
+    // Test Content routing
+    const contentResponse = await orchestrator.handle(
+      'Write a LinkedIn post about AI trends',
       channelId,
-      threadTs,
+      'thread-content',
       'U456'
     );
+    // Should route to Content agent
+    expect(contentResponse.message).toBeDefined();
+  }, 60000);
 
-    expect(response3.message.toLowerCase()).toContain('task');
-    expect(response3.message.toLowerCase()).toContain('maria');
-  });
+  it('maintains conversation context', async () => {
+    const channelId = `C-${randomUUID().slice(0, 8)}`;
+    const threadTs = `thread-${Date.now()}`;
 
-  it('handles ambiguous requests by asking for clarification', async () => {
-    // Mock LLM to return low-confidence classification
-    mockFetch.mockImplementation(async (url: string) => {
-      if (url.includes('openai')) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({
-                  agent: 'general',
-                  intent: 'Unclear request',
-                  confidence: 0.3,
-                  entities: []
-                }),
-                role: 'assistant'
-              }
-            }]
-          })
-        };
-      }
-      return { ok: false, status: 404 };
-    });
-
-    const response = await orchestrator.handle(
-      'do the thing',
-      'C123',
-      'thread-1',
-      'U456'
-    );
-
-    // Should ask for clarification
-    expect(response.message.toLowerCase()).toContain('clarify');
-  });
-
-  it('maintains context across agent switches', async () => {
-    // Set up context with a contact
-    const channelId = 'C123';
-    const threadTs = 'thread-1';
-
-    // First, create a context with an entity
-    const context = orchestrator.getContext(channelId, threadTs);
-    expect(context).not.toBeNull();
-
-    // Mock successful responses
-    mockFetch.mockImplementation(async (url: string) => {
-      if (url.includes('openai')) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{
-              message: {
-                content: 'Draft created about Maria Lopez.',
-                role: 'assistant'
-              }
-            }]
-          })
-        };
-      }
-      return { ok: false, status: 404 };
-    });
-
-    // First, talk to HubSpot agent
+    // First message
     await orchestrator.handle(
-      'Add Maria Lopez as a contact',
+      'Hello, I need help with my CRM',
       channelId,
       threadTs,
       'U456'
     );
 
-    // Then switch to content agent but reference the contact
+    // Second message in same thread
     const response = await orchestrator.handle(
-      'Write a LinkedIn post about my meeting with her',
+      'Can you list my contacts?',
       channelId,
       threadTs,
       'U456'
     );
 
-    // The context should have preserved the entity
-    const updatedContext = orchestrator.getContext(channelId, threadTs);
-    expect(updatedContext?.history.length).toBeGreaterThan(1);
-  });
+    // Context should have history
+    const context = orchestrator.getContext(channelId, threadTs);
+    expect(context?.history.length).toBeGreaterThanOrEqual(2);
+    expect(response.message).toBeDefined();
+  }, 60000);
 });

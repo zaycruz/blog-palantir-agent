@@ -256,11 +256,11 @@ describe('ContextManager', () => {
   });
 
   describe('cleanup', () => {
-    it('removes expired contexts', async () => {
-      // Create a context normally
-      const context = contextManager.getContext('C999', 'thread-cleanup');
+    it('removes expired non-threaded contexts only', async () => {
+      // Create a non-threaded context (like a DM without thread)
+      const context = contextManager.getContext('C999-dm');  // No threadTs
 
-      // Manually set the context to be expired by updating the database directly
+      // Manually set the context to be expired
       const pastTime = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1 hour ago
       db.prepare(`
         UPDATE conversation_contexts
@@ -272,8 +272,29 @@ describe('ContextManager', () => {
       expect(cleaned).toBeGreaterThan(0);
 
       // Context should be gone - getting it again should create a new one
-      const newContext = contextManager.getContext('C999', 'thread-cleanup');
+      const newContext = contextManager.getContext('C999-dm');
       expect(newContext.id).not.toBe(context.id);
+    });
+
+    it('preserves expired threaded contexts', async () => {
+      // Create a threaded context
+      const context = contextManager.getContext('C999', 'thread-persist');
+
+      // Manually set the context to be expired
+      const pastTime = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1 hour ago
+      db.prepare(`
+        UPDATE conversation_contexts
+        SET expires_at = ?
+        WHERE id = ?
+      `).run(pastTime, context.id);
+
+      const cleaned = contextManager.cleanup();
+      // Should NOT delete threaded contexts
+      expect(cleaned).toBe(0);
+
+      // Context should still exist
+      const sameContext = contextManager.getContext('C999', 'thread-persist');
+      expect(sameContext.id).toBe(context.id);
     });
   });
 });

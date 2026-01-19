@@ -29,7 +29,9 @@ export class SlackApp {
       logLevel: config.logLevel || LogLevel.INFO
     });
 
-    this.handler = new SlackMessageHandler(this.app, orchestrator);
+    this.handler = new SlackMessageHandler(this.app, orchestrator, {
+      auditChannel: config.auditChannel
+    });
   }
 
   async start(): Promise<void> {

@@ -16,14 +16,42 @@ import {
   createRateLimitError,
   withRetry
 } from '../../shared/errors.js';
+import { HubSpotOAuth, createHubSpotOAuth } from './oauth.js';
 
 const HUBSPOT_API_BASE = 'https://api.hubapi.com';
 
 export class HubSpotApiClient {
-  private accessToken: string;
+  private accessToken: string | null;
+  private oauth: HubSpotOAuth | null = null;
 
   constructor(config: HubSpotConfig) {
-    this.accessToken = config.accessToken;
+    this.accessToken = config.accessToken || null;
+    
+    // If no access token but OAuth credentials exist, set up OAuth
+    if (!this.accessToken && process.env.HUBSPOT_CLIENT_ID) {
+      try {
+        this.oauth = createHubSpotOAuth();
+      } catch {
+        // OAuth not configured
+      }
+    }
+  }
+
+  // Get access token (from config or OAuth)
+  private async getToken(): Promise<string> {
+    if (this.accessToken) {
+      return this.accessToken;
+    }
+
+    if (this.oauth) {
+      const token = await this.oauth.getAccessToken();
+      if (token) {
+        return token;
+      }
+      throw createAuthError('HubSpot OAuth token not available. Run OAuth flow first.');
+    }
+
+    throw createAuthError('HubSpot not configured. Set HUBSPOT_ACCESS_TOKEN or OAuth credentials.');
   }
 
   private async request<T>(
@@ -31,11 +59,13 @@ export class HubSpotApiClient {
     endpoint: string,
     body?: any
   ): Promise<T> {
+    const token = await this.getToken();
+    
     return withRetry(async () => {
       const response = await fetch(`${HUBSPOT_API_BASE}${endpoint}`, {
         method,
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: body ? JSON.stringify(body) : undefined
