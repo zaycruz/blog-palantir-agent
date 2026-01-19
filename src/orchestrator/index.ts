@@ -6,6 +6,7 @@ import { ContextManager } from './context.js';
 import { IntentClassifier } from './classifier.js';
 import { ContentAgent } from '../agents/content/index.js';
 import { HubSpotAgent } from '../agents/hubspot/index.js';
+import { LinearAgent } from '../agents/linear/index.js';
 import {
   AgentType,
   AgentResponse,
@@ -34,6 +35,7 @@ export class Orchestrator {
   private classifier: IntentClassifier;
   private contentAgent: ContentAgent;
   private hubspotAgent: HubSpotAgent;
+  private linearAgent: LinearAgent;
 
   constructor(db: Database.Database, config: OrchestratorConfig) {
     this.db = db;
@@ -42,6 +44,7 @@ export class Orchestrator {
     this.classifier = new IntentClassifier(this.llm, config.classifier);
     this.contentAgent = new ContentAgent(db, this.llm);
     this.hubspotAgent = new HubSpotAgent(db, this.llm);
+    this.linearAgent = new LinearAgent(db, this.llm);
   }
 
   // Main entry point for handling messages
@@ -188,6 +191,9 @@ export class Orchestrator {
       case 'hubspot':
         return this.hubspotAgent.handle(message, history, entities);
 
+      case 'linear':
+        return this.linearAgent.handle(message, history, entities);
+
       case 'general':
       default:
         return this.handleGeneralQuery(message, history);
@@ -199,16 +205,18 @@ export class Orchestrator {
     message: string,
     history: Array<{ role: 'user' | 'assistant'; content: string }>
   ): Promise<AgentResponse> {
-    const systemPrompt = `You are a helpful assistant with two main capabilities:
+    const systemPrompt = `You are a helpful assistant with three main capabilities:
 
 1. Content Creation (via Content Agent): Create LinkedIn posts, articles, manage drafts, research topics
 2. CRM Management (via HubSpot Agent): Manage contacts, companies, deals, tasks, and notes
+3. Project Management (via Linear Agent): Manage issues, projects, sprints, and team tasks
 
 For general questions or greetings, respond helpfully. If the user's request is unclear, ask clarifying questions to understand what they need.
 
 Available commands:
 - Content: "Write a LinkedIn post about...", "Show my drafts", "Add topic..."
 - HubSpot: "Add contact...", "Create deal...", "Log note on...", "Follow up with..."
+- Linear: "Create issue...", "My tasks", "Current sprint", "Update issue..."
 
 Be friendly and conversational, but concise.`;
 

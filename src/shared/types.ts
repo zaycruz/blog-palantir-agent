@@ -1,7 +1,7 @@
 // Shared types for the multi-agent platform
 
 // Agent types
-export type AgentType = 'content' | 'hubspot' | 'general';
+export type AgentType = 'content' | 'hubspot' | 'linear' | 'general';
 
 // Content types (from original models)
 export type ContentType = "linkedin_post" | "linkedin_article" | "blog_post";

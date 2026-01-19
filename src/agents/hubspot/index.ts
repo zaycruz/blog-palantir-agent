@@ -6,6 +6,7 @@ import { tool } from 'ai';
 import { LLMClient } from '../../shared/llm.js';
 import { HubSpotApiClient } from './api.js';
 import { AgentResponse, ExtractedEntity, EntityRef } from '../../shared/types.js';
+import { getSkillsPrompt } from '../../shared/skills.js';
 import {
   CreateContactInput,
   CreateCompanyInput,
@@ -104,6 +105,10 @@ export class HubSpotAgent {
 
     const tools = this.getTools();
 
+    // Load skills and build system prompt
+    const skillsPrompt = getSkillsPrompt('hubspot');
+    const systemPrompt = HUBSPOT_AGENT_SYSTEM_PROMPT + skillsPrompt;
+
     // Build context about resolved entities
     let contextAddition = '';
     if (entities.length > 0) {
@@ -118,7 +123,7 @@ export class HubSpotAgent {
       message + contextAddition,
       history.map(h => ({ role: h.role, content: h.content })),
       {
-        systemPrompt: HUBSPOT_AGENT_SYSTEM_PROMPT,
+        systemPrompt,
         tools,
         maxSteps: 10
       }
